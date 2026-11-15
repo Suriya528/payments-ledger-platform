@@ -1,0 +1,11 @@
+package com.suriya.payments.application;
+
+/** Event type names published for payments (also used as the Kafka message's logical type). */
+public final class PaymentEventTypes {
+
+  public static final String SUCCEEDED = "payment.succeeded";
+  public static final String FAILED = "payment.failed";
+  public static final String REFUNDED = "payment.refunded";
+
+  private PaymentEventTypes() {}
+}

@@ -1,0 +1,22 @@
+package com.suriya.payments.repository;
+
+import com.suriya.payments.domain.AccountBalance;
+import jakarta.persistence.LockModeType;
+import java.util.Optional;
+import java.util.UUID;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+
+public interface AccountBalanceRepository extends JpaRepository<AccountBalance, UUID> {
+
+  /**
+   * Pessimistic SELECT ... FOR UPDATE on the balance row being debited. Serializes concurrent
+   * debits per account so a wallet cannot be oversold. (Wired here for M1; used by the debit path
+   * in PaymentService.)
+   */
+  @Lock(LockModeType.PESSIMISTIC_WRITE)
+  @Query("select b from AccountBalance b where b.accountId = :accountId")
+  Optional<AccountBalance> findByIdForUpdate(@Param("accountId") UUID accountId);
+}

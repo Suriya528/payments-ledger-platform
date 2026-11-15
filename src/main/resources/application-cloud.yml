@@ -1,0 +1,9 @@
+# Render/cloud profile. Activate with SPRING_PROFILES_ACTIVE=cloud.
+spring:
+  datasource:
+    url: jdbc:postgresql://${DB_HOST}:${DB_PORT:5432}/${DB_NAME}?sslmode=require   # Neon requires TLS
+
+management:
+  health:
+    redis:
+      enabled: false   # spring-data-redis is on the classpath but unused; don't fail health on it
