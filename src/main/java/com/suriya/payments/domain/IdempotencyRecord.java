@@ -13,6 +13,8 @@ import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.annotations.JdbcTypeCode;
+import org.hibernate.type.SqlTypes;
 
 /**
  * Durable record of an idempotent request, keyed uniquely by (merchant_id, idem_key). Makes a
@@ -52,7 +54,8 @@ public class IdempotencyRecord {
   @Column(name = "response_code")
   private Integer responseCode;
 
-  @Column(name = "response_body", length = 4096)
+  @JdbcTypeCode(SqlTypes.JSON)
+  @Column(name = "response_body", columnDefinition = "jsonb")
   private String responseBody;
 
   @Column(name = "created_at", nullable = false)
