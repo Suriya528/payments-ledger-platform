@@ -191,17 +191,30 @@ curl -i -X POST http://localhost:8080/v1/payments \
 
 ### 3. Verify Continuous Ledger Integrity & Audit Report
 ```bash
-# Verify ledger balance equation: sum(debits) - sum(credits) == 0
-curl http://localhost:8080/v1/reconciliation/report \
+# Verify ledger balance equation & generate cryptographic solvency certificate
+curl http://localhost:8080/v1/ledger/audit \
   -H "X-API-Key: admin-live-key-secret-999"
 
 # Response:
-# { "balanced": true, "ledgerNet": 0, "driftedAccounts": 0 }
+# {
+#   "status": "VERIFIED_HEALTHY",
+#   "netVariance": 0,
+#   "driftedAccountsCount": 0,
+#   "driftedAccounts": [],
+#   "totalTransactions": 3,
+#   "totalPostings": 6,
+#   "solvencyFingerprint": "0x5d8a93e...",
+#   "auditedAt": "2026-11-16T16:00:00Z"
+# }
+
+# Trigger on-demand payment reconciliation cycle
+curl -X POST http://localhost:8080/v1/ledger/reconcile \
+  -H "X-API-Key: admin-live-key-secret-999"
 ```
 
 ---
 
-## 📊 Comprehensive Test Suite (41 Tests)
+## 📊 Comprehensive Test Suite (45 Tests)
 
 The test suite runs with zero manual setup and passes across all environments:
 

@@ -52,7 +52,7 @@ public class SecurityConfig {
                     .hasRole("ADMIN")
                     .requestMatchers(HttpMethod.POST, "/v1/accounts/*/fund")
                     .hasRole("ADMIN")
-                    .requestMatchers("/v1/reconciliation/**")
+                    .requestMatchers("/v1/reconciliation/**", "/v1/ledger/**")
                     .hasRole("ADMIN")
                     // Authenticated operations (Merchant or Admin)
                     .anyRequest()
