@@ -58,9 +58,13 @@ class ReconciliationIT extends AbstractIntegrationTest {
             .createAccount(
                 OwnerType.USER, "rogue-" + UUID.randomUUID(), AccountType.USER_WALLET, "INR")
             .getId();
-    fund(rogue, 100); // balance set without any postings -> must be flagged as drift
+    try {
+      fund(rogue, 100); // balance set without any postings -> must be flagged as drift
 
-    assertThat(integrity.check().driftedAccounts()).contains(rogue);
+      assertThat(integrity.check().driftedAccounts()).contains(rogue);
+    } finally {
+      fund(rogue, 0); // restore zero balance to preserve clean ledger state for downstream tests
+    }
   }
 
   private void fund(UUID accountId, long amount) {

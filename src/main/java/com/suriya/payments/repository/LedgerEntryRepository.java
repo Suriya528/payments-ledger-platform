@@ -24,15 +24,17 @@ public interface LedgerEntryRepository extends JpaRepository<LedgerEntry, Long> 
 
   /**
    * Accounts whose materialized balance disagrees with the sum of their postings (credit - debit).
+   * Excludes internal SYSTEM_RESERVE clearing accounts which serve as the initial minting source.
    * Uses standard ANSI SQL CAST to VARCHAR to ensure cross-database driver compatibility.
    */
   @Query(
       value =
           "SELECT CAST(b.account_id AS VARCHAR) FROM account_balances b"
+              + " JOIN accounts a ON a.id = b.account_id"
               + " LEFT JOIN (SELECT account_id,"
               + "   COALESCE(SUM(CASE direction WHEN 'CREDIT' THEN amount ELSE -amount END), 0) AS computed"
               + "   FROM ledger_entries GROUP BY account_id) e ON e.account_id = b.account_id"
-              + " WHERE b.balance <> COALESCE(e.computed, 0)",
+              + " WHERE a.type <> 'SYSTEM_RESERVE' AND b.balance <> COALESCE(e.computed, 0)",
       nativeQuery = true)
   List<String> findDriftedAccountStrings();
 
