@@ -21,9 +21,12 @@ import org.springframework.test.web.servlet.MockMvc;
 @AutoConfigureMockMvc
 class RefundControllerIT extends AbstractIntegrationTest {
 
+  private static final String MERCHANT_KEY = "merchant-m1-key-456";
+
   @Autowired MockMvc mvc;
   @Autowired PaymentService payments;
   @Autowired AccountService accounts;
+  @Autowired com.suriya.payments.repository.AccountRepository accountRepo;
   @Autowired AccountBalanceRepository balances;
 
   @Test
@@ -31,6 +34,7 @@ class RefundControllerIT extends AbstractIntegrationTest {
     UUID paymentId = capturedPayment(50);
     mvc.perform(
             post("/v1/payments/{id}/refunds", paymentId)
+                .header("X-API-Key", MERCHANT_KEY)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":50}"))
@@ -44,6 +48,7 @@ class RefundControllerIT extends AbstractIntegrationTest {
     UUID paymentId = capturedPayment(50);
     mvc.perform(
             post("/v1/payments/{id}/refunds", paymentId)
+                .header("X-API-Key", MERCHANT_KEY)
                 .header("Idempotency-Key", UUID.randomUUID().toString())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("{\"amount\":60}"))
@@ -57,13 +62,15 @@ class RefundControllerIT extends AbstractIntegrationTest {
                 OwnerType.USER, "payer-" + UUID.randomUUID(), AccountType.USER_WALLET, "INR")
             .getId();
     UUID payee =
-        accounts
-            .createAccount(
-                OwnerType.MERCHANT,
-                "payee-" + UUID.randomUUID(),
-                AccountType.MERCHANT_PAYABLE,
-                "INR")
-            .getId();
+        accountRepo
+            .findByOwnerTypeAndOwnerId(OwnerType.MERCHANT, "m1")
+            .map(com.suriya.payments.domain.Account::getId)
+            .orElseGet(
+                () ->
+                    accounts
+                        .createAccount(
+                            OwnerType.MERCHANT, "m1", AccountType.MERCHANT_PAYABLE, "INR")
+                        .getId());
     var balance = balances.findById(payer).orElseThrow();
     balance.setBalance(100L);
     balances.saveAndFlush(balance);
@@ -75,3 +82,4 @@ class RefundControllerIT extends AbstractIntegrationTest {
         .id();
   }
 }
+

@@ -1,18 +1,25 @@
-# ---- build stage: compile + package inside a Gradle/JDK21 image (no host JDK needed) ----
-FROM gradle:8.11.1-jdk21 AS build
-WORKDIR /home/gradle/src
-# Cache dependency resolution as its own layer
-COPY --chown=gradle:gradle build.gradle settings.gradle ./
-RUN gradle dependencies --no-daemon || true
-COPY --chown=gradle:gradle src ./src
-RUN gradle bootJar --no-daemon -x test
+# ---- Stage 1: Build & Package with Maven ----
+FROM eclipse-temurin:21-jdk-alpine AS build
+WORKDIR /workspace
 
-# ---- runtime stage: slim JRE, non-root ----
+# Copy Maven wrapper & POM to leverage Docker layer caching
+COPY .mvn .mvn
+COPY mvnw pom.xml ./
+RUN ./mvnw dependency:go-offline -B || true
+
+# Copy source code and package application
+COPY src ./src
+RUN ./mvnw clean package -DskipTests -B
+
+# ---- Stage 2: Minimal Slim JRE Runtime ----
 FROM eclipse-temurin:21-jre-alpine AS runtime
 WORKDIR /app
+
+# Run as non-root user for container security
 RUN addgroup -S app && adduser -S app -G app
-COPY --from=build /home/gradle/src/build/libs/*.jar app.jar
+COPY --from=build /workspace/target/*.jar app.jar
 USER app
+
 EXPOSE 8080
-# Honors Render's $PORT via server.port in application.yml.
-ENTRYPOINT ["java", "-jar", "app.jar"]
+ENV JAVA_OPTS="-XX:+UseZGC -XX:+ZGenerational -XX:MaxRAMPercentage=75.0"
+ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]

@@ -1,14 +1,19 @@
 package com.suriya.payments.infrastructure.config;
 
+import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Contact;
 import io.swagger.v3.oas.models.info.Info;
 import io.swagger.v3.oas.models.info.License;
+import io.swagger.v3.oas.models.security.SecurityRequirement;
+import io.swagger.v3.oas.models.security.SecurityScheme;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
 public class OpenApiConfig {
+
+  private static final String API_KEY_SCHEME = "ApiKeyAuth";
 
   @Bean
   public OpenAPI customOpenAPI() {
@@ -24,7 +29,8 @@ public class OpenApiConfig {
                         + "- **Strict Idempotency:** Header `Idempotency-Key` prevents double-charging and concurrent duplicate processing.\n"
                         + "- **Hold -> Settle Saga:** Decouples external PSP calls from database transactions.\n"
                         + "- **Transactional Outbox:** Guaranteed at-least-once event delivery without distributed 2PC dual-writes.\n"
-                        + "- **Continuous Reconciliation:** Real-time auditing for drifted balances and stale hold expiration.")
+                        + "- **Continuous Reconciliation:** Real-time auditing for drifted balances and stale hold expiration.\n"
+                        + "- **API Key Security:** Authenticate with `admin-live-key-secret-999` (Admin) or `merchant-acme-key-123` (Merchant).")
                 .contact(
                     new Contact()
                         .name("Engineering Team")
@@ -32,6 +38,16 @@ public class OpenApiConfig {
                 .license(
                     new License()
                         .name("Apache 2.0")
-                        .url("https://www.apache.org/licenses/LICENSE-2.0.html")));
+                        .url("https://www.apache.org/licenses/LICENSE-2.0.html")))
+        .addSecurityItem(new SecurityRequirement().addList(API_KEY_SCHEME))
+        .components(
+            new Components()
+                .addSecuritySchemes(
+                    API_KEY_SCHEME,
+                    new SecurityScheme()
+                        .name("X-API-Key")
+                        .type(SecurityScheme.Type.APIKEY)
+                        .in(SecurityScheme.In.HEADER)
+                        .description("Enter your API Key: `admin-live-key-secret-999` or `merchant-acme-key-123`")));
   }
 }

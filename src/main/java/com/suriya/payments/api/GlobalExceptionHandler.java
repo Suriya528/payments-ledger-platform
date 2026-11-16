@@ -3,12 +3,15 @@ package com.suriya.payments.api;
 import com.suriya.payments.application.AccountNotFoundException;
 import com.suriya.payments.application.IdempotencyConflictException;
 import com.suriya.payments.application.IdempotencyMismatchException;
+import com.suriya.payments.application.InvalidFinancialTransactionException;
 import com.suriya.payments.application.InvalidSignatureException;
 import com.suriya.payments.application.PaymentNotFoundException;
 import com.suriya.payments.application.RefundNotAllowedException;
 import com.suriya.payments.domain.InsufficientFundsException;
+import com.suriya.payments.infrastructure.psp.PspTimeoutException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 
@@ -18,6 +21,11 @@ public class GlobalExceptionHandler {
 
   @ExceptionHandler(InsufficientFundsException.class)
   ProblemDetail handleInsufficientFunds(InsufficientFundsException e) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
+  }
+
+  @ExceptionHandler(InvalidFinancialTransactionException.class)
+  ProblemDetail handleInvalidFinancialTransaction(InvalidFinancialTransactionException e) {
     return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
   }
 
@@ -49,5 +57,15 @@ public class GlobalExceptionHandler {
   @ExceptionHandler(RefundNotAllowedException.class)
   ProblemDetail handleRefundNotAllowed(RefundNotAllowedException e) {
     return ProblemDetail.forStatusAndDetail(HttpStatus.UNPROCESSABLE_ENTITY, e.getMessage());
+  }
+
+  @ExceptionHandler(PspTimeoutException.class)
+  ProblemDetail handlePspTimeout(PspTimeoutException e) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.GATEWAY_TIMEOUT, e.getMessage());
+  }
+
+  @ExceptionHandler(AccessDeniedException.class)
+  ProblemDetail handleAccessDenied(AccessDeniedException e) {
+    return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, e.getMessage());
   }
 }

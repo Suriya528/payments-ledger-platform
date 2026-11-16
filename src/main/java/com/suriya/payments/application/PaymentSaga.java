@@ -1,21 +1,26 @@
 package com.suriya.payments.application;
 
 import com.suriya.payments.domain.Account;
+import com.suriya.payments.domain.AccountBalance;
 import com.suriya.payments.domain.AccountType;
 import com.suriya.payments.domain.Direction;
 import com.suriya.payments.domain.LedgerService;
 import com.suriya.payments.domain.LedgerService.Posting;
+import com.suriya.payments.domain.OwnerType;
 import com.suriya.payments.domain.Payment;
 import com.suriya.payments.domain.PaymentStatus;
 import com.suriya.payments.domain.Refund;
 import com.suriya.payments.domain.RefundStatus;
 import com.suriya.payments.domain.TransactionType;
+import com.suriya.payments.repository.AccountBalanceRepository;
 import com.suriya.payments.repository.AccountRepository;
 import com.suriya.payments.repository.PaymentRepository;
 import com.suriya.payments.repository.RefundRepository;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +37,9 @@ public class PaymentSaga {
   private final LedgerService ledger;
   private final OutboxWriter outboxWriter;
   private final RefundRepository refunds;
+
+  @Value("${payments.fee-basis-points:0}")
+  private int feeBasisPoints;
 
   public PaymentSaga(
       PaymentRepository payments,
@@ -55,7 +63,7 @@ public class PaymentSaga {
     payment.setPayerAccount(request.payerAccountId());
     payment.setPayeeAccount(request.payeeAccountId());
     payment.setAmount(request.amount());
-    payment.setCurrency(request.currency());
+    payment.setCurrency(request.currency().toUpperCase());
     payment.setStatus(PaymentStatus.PROCESSING);
     payment.setCreatedAt(Instant.now());
     payment.setUpdatedAt(Instant.now());
@@ -70,16 +78,21 @@ public class PaymentSaga {
     return payment;
   }
 
-  /** Tx2 (approved): move suspense -> payee and mark the payment succeeded. */
+  /** Tx2 (approved): move suspense -> payee (and fee -> fee_income) and mark payment succeeded. */
   @Transactional
   public void settle(UUID paymentId, String pspReference) {
     Payment payment = payments.findById(paymentId).orElseThrow();
-    ledger.post(
-        TransactionType.PAYMENT,
-        paymentId,
-        List.of(
-            new Posting(suspenseAccountId(), Direction.DEBIT, payment.getAmount()),
-            new Posting(payment.getPayeeAccount(), Direction.CREDIT, payment.getAmount())));
+    long feeAmount = (payment.getAmount() * feeBasisPoints) / 10_000L;
+    long payeeAmount = payment.getAmount() - feeAmount;
+
+    List<Posting> postings = new ArrayList<>();
+    postings.add(new Posting(suspenseAccountId(), Direction.DEBIT, payment.getAmount()));
+    postings.add(new Posting(payment.getPayeeAccount(), Direction.CREDIT, payeeAmount));
+    if (feeAmount > 0) {
+      postings.add(new Posting(feeIncomeAccountId(), Direction.CREDIT, feeAmount));
+    }
+    ledger.post(TransactionType.PAYMENT, paymentId, postings);
+
     payment.setStatus(PaymentStatus.SUCCEEDED);
     payment.setPspReference(pspReference);
     payment.setUpdatedAt(Instant.now());
@@ -113,7 +126,17 @@ public class PaymentSaga {
   }
 
   /**
-   * Refund (full or partial) a captured payment: move payee -> payer and update the running total.
+   * PSP call timed out or failed with network ambiguity: hold is preserved, marked for background reconciliation.
+   */
+  @Transactional
+  public void markRequiresReconciliation(UUID paymentId) {
+    Payment payment = payments.findById(paymentId).orElseThrow();
+    payment.setStatus(PaymentStatus.REQUIRES_RECONCILIATION);
+    payment.setUpdatedAt(Instant.now());
+  }
+
+  /**
+   * Refund (full or partial) a captured payment: move payee (and fee) -> payer and update the running total.
    */
   @Transactional
   public void refund(UUID refundId, UUID paymentId, long amount) {
@@ -130,12 +153,16 @@ public class PaymentSaga {
           "refund %d exceeds the remaining refundable amount %d".formatted(amount, remaining));
     }
 
-    ledger.post(
-        TransactionType.REFUND,
-        paymentId,
-        List.of(
-            new Posting(payment.getPayeeAccount(), Direction.DEBIT, amount),
-            new Posting(payment.getPayerAccount(), Direction.CREDIT, amount)));
+    long feeRefund = (amount * feeBasisPoints) / 10_000L;
+    long payeeRefund = amount - feeRefund;
+
+    List<Posting> postings = new ArrayList<>();
+    postings.add(new Posting(payment.getPayeeAccount(), Direction.DEBIT, payeeRefund));
+    if (feeRefund > 0) {
+      postings.add(new Posting(feeIncomeAccountId(), Direction.DEBIT, feeRefund));
+    }
+    postings.add(new Posting(payment.getPayerAccount(), Direction.CREDIT, amount));
+    ledger.post(TransactionType.REFUND, paymentId, postings);
 
     Refund refund = new Refund();
     refund.setId(refundId);
@@ -172,5 +199,13 @@ public class PaymentSaga {
             .findFirstByType(AccountType.PSP_SUSPENSE)
             .orElseThrow(() -> new IllegalStateException("no PSP_SUSPENSE account configured"));
     return suspense.getId();
+  }
+
+  private UUID feeIncomeAccountId() {
+    Account feeAccount =
+        accounts
+            .findFirstByType(AccountType.FEE_INCOME)
+            .orElseThrow(() -> new IllegalStateException("no FEE_INCOME account configured"));
+    return feeAccount.getId();
   }
 }

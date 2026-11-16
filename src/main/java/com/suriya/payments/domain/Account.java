@@ -6,13 +6,20 @@ import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "accounts")
+@Table(
+    name = "accounts",
+    uniqueConstraints = {
+      @UniqueConstraint(
+          name = "uk_account_natural_key",
+          columnNames = {"owner_type", "owner_id", "type", "currency"})
+    })
 @Getter
 @Setter
 public class Account {

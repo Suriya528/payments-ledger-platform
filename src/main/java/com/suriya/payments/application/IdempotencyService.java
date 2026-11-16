@@ -31,7 +31,6 @@ public class IdempotencyService {
     record.setRequestHash(requestHash);
     record.setStatus(IdempotencyStatus.IN_PROGRESS);
     record.setCreatedAt(Instant.now());
-    // saveAndFlush surfaces a duplicate-key violation now, inside this transaction.
     return records.saveAndFlush(record);
   }
 
@@ -41,14 +40,26 @@ public class IdempotencyService {
   }
 
   @Transactional
+  public void attachResource(Long id, UUID resourceId) {
+    IdempotencyRecord record = records.findById(id).orElseThrow();
+    record.setResourceId(resourceId);
+  }
+
+  @Transactional
   public void markCompleted(Long id, UUID resourceId, int responseCode) {
+    markCompleted(id, resourceId, responseCode, null);
+  }
+
+  @Transactional
+  public void markCompleted(Long id, UUID resourceId, int responseCode, String responseBody) {
     IdempotencyRecord record = records.findById(id).orElseThrow();
     record.setStatus(IdempotencyStatus.COMPLETED);
     record.setResourceId(resourceId);
     record.setResponseCode(responseCode);
+    record.setResponseBody(responseBody);
   }
 
-  /** Releases a claimed key whose operation failed, so a genuine retry can re-attempt. */
+  /** Releases a claimed key whose operation failed before any hold occurred, so a genuine retry can re-attempt. */
   @Transactional
   public void release(Long id) {
     records.deleteById(id);

@@ -22,10 +22,6 @@ spring:
   flyway:
     enabled: false
 
-  data:
-    redis:
-      repositories:
-        enabled: false
 
 # Seed accounts automatically on boot for local development
 payments:

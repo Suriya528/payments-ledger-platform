@@ -8,6 +8,7 @@ import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.Table;
+import jakarta.persistence.UniqueConstraint;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Getter;
@@ -19,7 +20,11 @@ import lombok.Setter;
  * with the same key replay it instead of re-running the operation.
  */
 @Entity
-@Table(name = "idempotency_keys")
+@Table(
+    name = "idempotency_keys",
+    uniqueConstraints = {
+      @UniqueConstraint(name = "uk_merchant_idem_key", columnNames = {"merchant_id", "idem_key"})
+    })
 @Getter
 @Setter
 public class IdempotencyRecord {
@@ -46,6 +51,9 @@ public class IdempotencyRecord {
 
   @Column(name = "response_code")
   private Integer responseCode;
+
+  @Column(name = "response_body", length = 4096)
+  private String responseBody;
 
   @Column(name = "created_at", nullable = false)
   private Instant createdAt = Instant.now();

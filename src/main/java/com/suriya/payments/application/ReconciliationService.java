@@ -2,11 +2,16 @@ package com.suriya.payments.application;
 
 import com.suriya.payments.domain.Payment;
 import com.suriya.payments.domain.PaymentStatus;
+import com.suriya.payments.infrastructure.psp.AuthorizationOutcome;
+import com.suriya.payments.infrastructure.psp.AuthorizationResult;
+import com.suriya.payments.infrastructure.psp.PaymentProvider;
 import com.suriya.payments.repository.PaymentRepository;
 import io.micrometer.core.instrument.MeterRegistry;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicLong;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,9 +20,10 @@ import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 
 /**
- * Periodic safety net: asserts ledger integrity (debits = credits, balances match postings) and
- * expires stale AUTHORIZED holds whose capture webhook never arrived (returning funds to the
- * payer). Runs on a schedule in production; tests invoke {@link #reconcile} directly.
+ * Continuous safety net:
+ * 1. Asserts ledger balance integrity (debits = credits, balance = sum(postings)).
+ * 2. Reconciles uncertain in-flight payments (PROCESSING, REQUIRES_RECONCILIATION, AUTHORIZED)
+ *    by verifying outcome with payment provider before settling or reversing back to payer.
  */
 @Service
 public class ReconciliationService {
@@ -27,6 +33,7 @@ public class ReconciliationService {
   private final LedgerIntegrityChecker integrity;
   private final PaymentRepository payments;
   private final PaymentSaga saga;
+  private final PaymentProvider psp;
   private final Duration authorizedTimeout;
   private final AtomicLong ledgerImbalance = new AtomicLong(0);
 
@@ -34,13 +41,14 @@ public class ReconciliationService {
       LedgerIntegrityChecker integrity,
       PaymentRepository payments,
       PaymentSaga saga,
+      PaymentProvider psp,
       MeterRegistry registry,
       @Value("${reconciliation.authorized-timeout:30m}") Duration authorizedTimeout) {
     this.integrity = integrity;
     this.payments = payments;
     this.saga = saga;
+    this.psp = psp;
     this.authorizedTimeout = authorizedTimeout;
-    // Must read 0 on a healthy ledger; alert if it ever drifts from zero.
     registry.gauge("ledger.imbalance", ledgerImbalance);
   }
 
@@ -58,20 +66,43 @@ public class ReconciliationService {
           result.ledgerNet(),
           result.driftedAccounts());
     }
-    int expired = expireStaleHolds();
-    return new ReconciliationReport(result.ledgerNet(), result.driftedAccounts(), expired);
+    int recovered = reconcileStalePayments();
+    return new ReconciliationReport(result.ledgerNet(), result.driftedAccounts(), recovered);
   }
 
-  private int expireStaleHolds() {
+  private int reconcileStalePayments() {
     Instant cutoff = Instant.now().minus(authorizedTimeout);
-    List<Payment> stale = payments.findByStatusAndUpdatedAtBefore(PaymentStatus.AUTHORIZED, cutoff);
-    for (Payment payment : stale) {
-      log.warn(
-          "expiring stale authorized payment {} (no capture within {})",
-          payment.getId(),
-          authorizedTimeout);
-      saga.reverse(payment.getId());
+    List<Payment> staleAuthorized =
+        payments.findByStatusAndUpdatedAtBefore(PaymentStatus.AUTHORIZED, cutoff);
+    List<Payment> staleProcessing =
+        payments.findByStatusAndUpdatedAtBefore(PaymentStatus.PROCESSING, cutoff);
+    List<Payment> staleReconcile =
+        payments.findByStatusAndUpdatedAtBefore(PaymentStatus.REQUIRES_RECONCILIATION, cutoff);
+
+    List<Payment> allStale = new ArrayList<>();
+    allStale.addAll(staleAuthorized);
+    allStale.addAll(staleProcessing);
+    allStale.addAll(staleReconcile);
+
+    for (Payment payment : allStale) {
+      log.info("Reconciling stale payment {} in status {}", payment.getId(), payment.getStatus());
+      try {
+        Optional<AuthorizationResult> providerStatus = psp.queryStatus(payment.getId());
+        if (providerStatus.isPresent()
+            && providerStatus.get().outcome() == AuthorizationOutcome.CAPTURED) {
+          log.info(
+              "Provider confirmed payment {} was CAPTURED. Settling now.", payment.getId());
+          saga.settle(payment.getId(), providerStatus.get().reference());
+        } else {
+          log.warn(
+              "Provider did not capture stale payment {} (or hold expired). Reversing funds to payer.",
+              payment.getId());
+          saga.reverse(payment.getId());
+        }
+      } catch (Exception e) {
+        log.error("Failed to reconcile payment {} with provider. Will retry next cycle.", payment.getId(), e);
+      }
     }
-    return stale.size();
+    return allStale.size();
   }
 }
